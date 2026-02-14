@@ -4,37 +4,49 @@ import time
 from groq import Groq
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import FastEmbedEmbeddings
-# FIX: Use the specific text_splitters library
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Fast FAISS RAG", layout="wide")
 st.title("⚡ FAISS Neural Search & RAG")
 
-# --- 1. SETUP & CACHING (The "Fast" Part) ---
+# --- 1. SETUP & CACHING ---
 @st.cache_resource
 def get_embeddings():
     return FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
 
-@st.cache_resource
+# --- FIX: Updated Client Initialization ---
 def get_groq_client():
-    try:
-        key = st.secrets["GROQ_API_KEY"]
-    except:
+    groq_api_key = None
+    
+    # 1. Try to get from Streamlit Secrets (Cloud Deployment)
+    if "GROQ_API_KEY" in st.secrets:
+        groq_api_key = st.secrets["GROQ_API_KEY"]
+        
+    # 2. If not in secrets, try the Environment Variable (Sidebar Input)
+    elif "GROQ_API_KEY" in os.environ:
+        groq_api_key = os.environ["GROQ_API_KEY"]
+        
+    if not groq_api_key:
         return None
-    return Groq(api_key=key)
+        
+    return Groq(api_key=groq_api_key)
 
 embeddings = get_embeddings()
 
-# --- 2. SIDEBAR: DATA INGESTION ---
+# --- 2. SIDEBAR: CONFIG & DATA ---
 with st.sidebar:
-    st.header("📂 Knowledge Base")
+    st.header("⚙️ Configuration")
     
+    # Show input box ONLY if key is not already in Secrets
     if "GROQ_API_KEY" not in st.secrets:
-        api_key_input = st.text_input("Groq API Key", type="password")
+        api_key_input = st.text_input("Enter Groq API Key", type="password")
         if api_key_input:
             os.environ["GROQ_API_KEY"] = api_key_input
+            st.success("Key Set!")
     
+    st.divider()
+    st.header("📂 Knowledge Base")
     uploaded_file = st.file_uploader("Upload .txt or .md", type=["txt", "md"])
     
     if "vector_store" not in st.session_state:
@@ -43,7 +55,6 @@ with st.sidebar:
     if uploaded_file and st.button("Build Fast Index"):
         with st.spinner("🚀 Indexing..."):
             text = uploaded_file.read().decode("utf-8")
-            # FIX: Use the imported splitter
             text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
             chunks = text_splitter.create_documents([text])
             
@@ -54,11 +65,14 @@ with st.sidebar:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+# Display Chat History
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
+# Handle Query
 if query := st.chat_input("Ask about your document..."):
+    # 1. Add User Query to Chat
     st.session_state.messages.append({"role": "user", "content": query})
     with st.chat_message("user"):
         st.markdown(query)
@@ -80,8 +94,9 @@ if query := st.chat_input("Ask about your document..."):
 
     # --- THE "GENERATION" LAYER ---
     client = get_groq_client()
+    
     if not client:
-        st.error("Groq API Key missing.")
+        st.error("❌ Groq API Key missing. Please enter it in the Sidebar.")
         st.stop()
         
     context_text = "\n\n".join([d.page_content for d in docs])
@@ -92,12 +107,14 @@ if query := st.chat_input("Ask about your document..."):
     ]
 
     with st.chat_message("assistant"):
-        stream = client.chat.completions.create(
-            messages=messages,
-            model="qwen-2.5-32b",
-            temperature=0.3,
-            stream=True
-        )
-        response = st.write_stream(stream)
-    
-    st.session_state.messages.append({"role": "assistant", "content": response})
+        try:
+            stream = client.chat.completions.create(
+                messages=messages,
+                model="qwen-2.5-32b",
+                temperature=0.3,
+                stream=True
+            )
+            response = st.write_stream(stream)
+            st.session_state.messages.append({"role": "assistant", "content": response})
+        except Exception as e:
+            st.error(f"Groq API Error: {e}")
