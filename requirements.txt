@@ -1,4 +1,0 @@
-streamlit
-pinecone-client
-groq
-fastembed
