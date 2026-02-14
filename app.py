@@ -15,21 +15,15 @@ st.title("⚡ FAISS Neural Search & RAG")
 def get_embeddings():
     return FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
 
-# --- FIX: Updated Client Initialization ---
 def get_groq_client():
     groq_api_key = None
-    
-    # 1. Try to get from Streamlit Secrets (Cloud Deployment)
     if "GROQ_API_KEY" in st.secrets:
         groq_api_key = st.secrets["GROQ_API_KEY"]
-        
-    # 2. If not in secrets, try the Environment Variable (Sidebar Input)
     elif "GROQ_API_KEY" in os.environ:
         groq_api_key = os.environ["GROQ_API_KEY"]
         
     if not groq_api_key:
         return None
-        
     return Groq(api_key=groq_api_key)
 
 embeddings = get_embeddings()
@@ -37,8 +31,6 @@ embeddings = get_embeddings()
 # --- 2. SIDEBAR: CONFIG & DATA ---
 with st.sidebar:
     st.header("⚙️ Configuration")
-    
-    # Show input box ONLY if key is not already in Secrets
     if "GROQ_API_KEY" not in st.secrets:
         api_key_input = st.text_input("Enter Groq API Key", type="password")
         if api_key_input:
@@ -57,7 +49,6 @@ with st.sidebar:
             text = uploaded_file.read().decode("utf-8")
             text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
             chunks = text_splitter.create_documents([text])
-            
             st.session_state.vector_store = FAISS.from_documents(chunks, embeddings)
             st.success(f"Index Built! ({len(chunks)} chunks)")
 
@@ -65,14 +56,11 @@ with st.sidebar:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Display Chat History
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# Handle Query
 if query := st.chat_input("Ask about your document..."):
-    # 1. Add User Query to Chat
     st.session_state.messages.append({"role": "user", "content": query})
     with st.chat_message("user"):
         st.markdown(query)
@@ -81,7 +69,6 @@ if query := st.chat_input("Ask about your document..."):
         st.warning("⚠️ Please upload a file and click 'Build Fast Index' first.")
         st.stop()
 
-    # --- THE "FAST SEARCH" LAYER ---
     start_time = time.time()
     docs = st.session_state.vector_store.similarity_search(query, k=4)
     retrieval_time = time.time() - start_time
@@ -92,11 +79,9 @@ if query := st.chat_input("Ask about your document..."):
             st.caption(doc.page_content[:300] + "...")
             st.divider()
 
-    # --- THE "GENERATION" LAYER ---
     client = get_groq_client()
-    
     if not client:
-        st.error("❌ Groq API Key missing. Please enter it in the Sidebar.")
+        st.error("❌ Groq API Key missing.")
         st.stop()
         
     context_text = "\n\n".join([d.page_content for d in docs])
@@ -110,7 +95,8 @@ if query := st.chat_input("Ask about your document..."):
         try:
             stream = client.chat.completions.create(
                 messages=messages,
-                model="qwen-2.5-32b",
+                # FIX: Switched to Llama 3.3 70B (Current Stable Model)
+                model="llama-3.3-70b-versatile",
                 temperature=0.3,
                 stream=True
             )
