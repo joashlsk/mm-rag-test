@@ -1,4 +1,5 @@
 streamlit
 groq
-pinecone
 fastembed
+langchain-community
+faiss-cpu
