@@ -1,10 +1,10 @@
 import streamlit as st
 import os
-import time
 from groq import Groq
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import FastEmbedEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from pypdf import PdfReader # <--- NEW IMPORT
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="RAG Debugger", layout="wide")
@@ -28,6 +28,28 @@ def get_groq_client():
 
 embeddings = get_embeddings()
 
+# --- HELPER: SAFE PDF EXTRACTION ---
+def get_pdf_text(uploaded_file):
+    """
+    Reads a PDF file safely.
+    Returns: (text, error_message)
+    """
+    try:
+        # pypdf reads directly from the stream (no need to save to disk)
+        reader = PdfReader(uploaded_file)
+        text = ""
+        for page in reader.pages:
+            text += page.extract_text() or ""  # Handle None if page is empty
+        
+        # Check if text was actually found (Handle Scanned PDFs)
+        if len(text.strip()) == 0:
+            return None, "PDF seems empty or scanned (image-only). This tool requires readable text."
+            
+        return text, None
+
+    except Exception as e:
+        return None, f"Failed to read PDF: {str(e)}"
+
 # --- 2. SIDEBAR: CONFIG & DATA ---
 with st.sidebar:
     st.header("⚙️ Configuration")
@@ -37,7 +59,6 @@ with st.sidebar:
             os.environ["GROQ_API_KEY"] = api_key_input
             st.success("Key Set!")
     
-    # Model Selector (In case one is down)
     model_option = st.selectbox(
         "Select Model:",
         ["llama-3.1-8b-instant", "llama-3.3-70b-versatile", "mixtral-8x7b-32768"],
@@ -46,23 +67,39 @@ with st.sidebar:
     
     st.divider()
     st.header("📂 1. Upload Document")
-    uploaded_file = st.file_uploader("Upload .txt or .md", type=["txt", "md"])
+    
+    # UPDATE: Accept both TXT and PDF
+    uploaded_file = st.file_uploader("Upload File", type=["txt", "pdf"]) #
     
     if "vector_store" not in st.session_state:
         st.session_state.vector_store = None
 
     if uploaded_file and st.button("Build Index"):
         with st.spinner("🚀 Indexing..."):
-            try:
-                text = uploaded_file.read().decode("utf-8")
-                text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
-                chunks = text_splitter.create_documents([text])
-                
-                # Force new index creation
-                st.session_state.vector_store = FAISS.from_documents(chunks, embeddings)
-                st.success(f"✅ Index Built! Processed {len(chunks)} chunks.")
-            except Exception as e:
-                st.error(f"Error reading file: {e}")
+            file_text = ""
+            error = None
+
+            # LOGIC: Switch based on file type
+            if uploaded_file.name.endswith(".pdf"):
+                file_text, error = get_pdf_text(uploaded_file)
+            else:
+                # Fallback for TXT files
+                file_text = uploaded_file.read().decode("utf-8")
+            
+            # Error Handling (Stops the crash)
+            if error:
+                st.error(f"❌ {error}")
+            elif not file_text:
+                st.warning("⚠️ File is empty.")
+            else:
+                # Success path
+                try:
+                    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+                    chunks = text_splitter.create_documents([file_text])
+                    st.session_state.vector_store = FAISS.from_documents(chunks, embeddings)
+                    st.success(f"✅ Index Built! Processed {len(chunks)} chunks.")
+                except Exception as e:
+                    st.error(f"Error during chunking: {e}")
 
 # --- 3. MAIN INTERFACE ---
 if "messages" not in st.session_state:
@@ -82,13 +119,11 @@ if query := st.chat_input("Ask a question (or type 'summarize')..."):
         st.stop()
 
     # --- RETRIEVAL STEP ---
-    # k=5 for more context
     docs = st.session_state.vector_store.similarity_search(query, k=5)
     
-    # DEBUG: Show what was found
     with st.expander("🔍 Debug: What did the RAG find?", expanded=True):
         if not docs:
-            st.warning("❌ No relevant text found in document.")
+            st.warning("❌ No relevant text found.")
         for i, doc in enumerate(docs):
             st.markdown(f"**Chunk {i+1}:** {doc.page_content[:150]}...")
 
@@ -100,12 +135,8 @@ if query := st.chat_input("Ask a question (or type 'summarize')..."):
         
     context_text = "\n\n".join([d.page_content for d in docs])
     
-    # Strict System Prompt
     system_prompt = f"""
-    You are an expert summarizer and assistant.
-    You must answer the user's question using ONLY the context provided below.
-    If the context does not contain the answer, say "I cannot find that information in the document."
-    
+    You are an expert summarizer. Answer using ONLY the context below.
     Context:
     {context_text}
     """
@@ -119,7 +150,7 @@ if query := st.chat_input("Ask a question (or type 'summarize')..."):
         try:
             stream = client.chat.completions.create(
                 messages=messages,
-                model=model_option, # Uses the dropdown selection
+                model=model_option,
                 temperature=0.3,
                 max_tokens=1024,
                 stream=True
