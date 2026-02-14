@@ -1,5 +1,5 @@
 streamlit
 groq
-fastembed
 langchain-community
 faiss-cpu
+fastembed
