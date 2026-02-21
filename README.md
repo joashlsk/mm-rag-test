@@ -3,30 +3,30 @@ streamlit (Front end UI)
 FAISS (Facebook AI Similarity Search)
 
 
-rag-system-root/
-├── frontend/               # Streamlit App (User Interface)
-│   ├── app.py              # Main UI Entry Point (Chat & Sidebar)
-│   └── components.py       # UI helpers (e.g., rendering chat messages)
+app.py/                     # Your Monolithic Streamlit Application
 │
-├── backend/                # Logic & API (The Brain)
-│   ├── main.py             # API Entry Point (FastAPI app setup)
-│   ├── api/                # Endpoints / Routes
-│   │   ├── chat.py         # The /chat endpoint (Handles querying Groq)
-│   │   └── document.py     # The /upload endpoint (Handles file processing)
-│   │
-│   ├── core/               # Core configuration and clients
-│   │   ├── config.py       # Environment variables (GROQ_API_KEY loading)
-│   │   └── llm_client.py   # Groq API initialization
-│   │
-│   └── services/           # RAG Business Logic
-│       ├── ingestion.py    # PyPDF reading & LangChain text chunking
-│       ├── embeddings.py   # FastEmbed initialization 
-│       └── retrieval.py    # FAISS indexing and similarity search logic
+├── 0. Imports/             # External library dependencies
+│   ├── streamlit           # UI framework
+│   ├── groq                # LLM API client
+│   ├── langchain_* # Vector store, embeddings, text splitters
+│   └── pypdf               # PDF text extraction
 │
-├── data/                   # Data Storage Layer
-│   ├── uploads/            # Temporary folder for uploaded PDFs and TXTs
-│   └── faiss_index/        # Directory to save/load persistent FAISS vectors
+├── 1. Page Config/         # UI initialization
+│   └── st.set_page_config  # Sets page title and wide layout
 │
-├── .env                    # Your secrets file (e.g., GROQ_API_KEY=...)
-├── .gitignore              # Ignores .env and data/ folders from Git
-└── requirements.txt        # Complete list of Python dependencies
+├── 2. Setup & Caching/     # Backend initialization functions
+│   ├── get_embeddings()    # Caches the BAAI FastEmbed model
+│   ├── get_groq_client()   # Retrieves and validates the API key
+│   └── get_pdf_text()      # Safely extracts text from uploaded PDFs
+│
+├── 3. Sidebar Config/      # Left-hand UI panel & Data Ingestion
+│   ├── API Key Input       # Fallback input for missing Groq keys
+│   ├── Model Selection     # Dropdown for Llama/Mixtral models
+│   ├── File Uploader       # Accepts .txt and .pdf files
+│   └── Build Index Logic   # Triggers document reading, chunking, and FAISS vector storage
+│
+└── 4. Main Interface/      # Chat UI & RAG Execution
+    ├── Chat History        # Loops through and renders past st.session_state messages
+    ├── User Input          # Captures the user's question via st.chat_input
+    ├── Retrieval Step      # FAISS similarity search & renders the debugging expander
+    └── Generation Step     # Assembles the system prompt, calls Groq, and streams the response
